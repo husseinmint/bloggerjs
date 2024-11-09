@@ -67,9 +67,22 @@ class BloggerMint {
         return;
       }
 
-      this.renderPosts(posts);
-      this.state.currentPage++;
-      this.applyCurrentView();
+      const container = document.getElementById(this.options.containerElementId);
+      if (!container) return;
+
+      // Add skeleton loaders
+      for (let i = 0; i < posts.length; i++) {
+        container.innerHTML += '<div class="skeleton rounded-lg dark:bg-neutral-800 h-96"></div>';
+      }
+
+      // Replace skeleton loaders with actual posts
+      setTimeout(() => {
+        container.querySelectorAll('.skeleton').forEach(skeleton => skeleton.remove());
+        this.renderPosts(posts);
+        this.state.currentPage++;
+        this.applyCurrentView();
+      }, 250);
+
     } catch (error) {
       console.error('Error loading posts:', error);
       this.updateLoadMoreButton('error');
@@ -115,7 +128,7 @@ class BloggerMint {
     const excerpt = this.getExcerpt(post);
     const author = post.author?.[0]?.name?.$t || 'Unknown Author';
     const dateFormatted = this.formatDate(post.published?.$t);
-    const authorImage = post.author?.[0]?.gd$image?.src || this.options.defaultAvatar;
+    const authorImage = this.getAuthorImage(post);
 
     postElement.innerHTML = `
       <div class="w-full h-60 rounded-t-lg">
@@ -131,7 +144,7 @@ class BloggerMint {
         <div class="shrink-0 group block mt-4">
           <div class="flex items-center">
             <img alt="Avatar" class="inline-block shrink-0 w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 rounded-full" src="${authorImage}">
-            <div class="rtl:mr-3 ltr:ml-3">
+            <div class="${this.isRTL() ? 'mr-3' : 'ml-3'}">
               <h3 class="font-semibold text-neutral-800 dark:text-neutral-300 text-sm sm:text-base">
                 ${author}
               </h3>
@@ -143,6 +156,8 @@ class BloggerMint {
         </div>
       </div>
     `;
+
+    postElement.setAttribute('data-author-image', authorImage);
 
     return postElement;
   }
@@ -161,12 +176,24 @@ class BloggerMint {
 
   formatDate(dateString) {
     const dateObj = new Date(dateString);
-    const isArabic = this.options.locale.startsWith('ar');
     return dateObj.toLocaleDateString(this.options.locale, { 
       year: 'numeric', 
       month: 'long', 
       day: 'numeric' 
     });
+  }
+
+  getAuthorImage(post) {
+    let authorImage = this.options.defaultAvatar;
+    const existingPosts = document.querySelectorAll(`#${this.options.containerElementId} > div`);
+    for (let i = 0; i < existingPosts.length; i++) {
+      const existingAuthorImage = existingPosts[i].getAttribute('data-author-image');
+      if (existingAuthorImage) {
+        authorImage = existingAuthorImage;
+        break;
+      }
+    }
+    return authorImage;
   }
 
   toggleView(gridView) {
@@ -205,11 +232,11 @@ class BloggerMint {
     const loadMoreButton = document.getElementById(this.options.loadMoreButtonId);
     if (!loadMoreButton) return;
 
-    const isArabic = this.options.locale.startsWith('ar');
+    const isArabic = this.isRTL();
 
     switch (state) {
       case 'loading':
-        loadMoreButton.innerHTML = isArabic ? 'جاري التحميل...' : 'Loading...';
+        loadMoreButton.innerHTML = isArabic ? 'جاري التحميل... <span class="mask spin"></span>' : 'Loading... <span class="mask spin"></span>';
         loadMoreButton.disabled = true;
         break;
       case 'error':
@@ -231,11 +258,15 @@ class BloggerMint {
     const loadMoreButton = document.getElementById(this.options.loadMoreButtonId);
     if (!loadMoreButton) return;
 
-    const isArabic = this.options.locale.startsWith('ar');
+    const isArabic = this.isRTL();
     
     loadMoreButton.textContent = isArabic ? 'لا يوجد مقالات أخرى' : 'No more posts';
     loadMoreButton.disabled = true;
     loadMoreButton.className = 'py-3 px-6 text-sm rounded-lg border border-primary text-primary cursor-not-allowed font-semibold text-center shadow-xs transition-all duration-500 bg-gray-300 text-gray-600';
+  }
+
+  isRTL() {
+    return this.options.locale.startsWith('ar') || document.dir === 'rtl';
   }
 
   async loadRelatedPosts() {
@@ -378,7 +409,7 @@ class BloggerMint {
 
     commentElement.innerHTML = `
       <div class="flex items-start">
-        <img src="${authorImage}" alt="${author}" class="w-10 h-10 rounded-full mr-4">
+        <img src="${authorImage}" alt="${author}" class="w-10 h-10 rounded-full ${this.isRTL() ? 'ml-4' : 'mr-4'}">
         <div>
           <h4 class="font-semibold">${author}</h4>
           <p class="text-sm text-gray-600 dark:text-gray-300">${content}</p>
