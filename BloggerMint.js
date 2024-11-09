@@ -8,6 +8,16 @@ class BloggerMint {
       defaultImage: 'https://via.placeholder.com/640x360',
       defaultAvatar: 'https://lh3.googleusercontent.com/a/default-user',
       perPage: 7,
+      containerElementId: 'articles-grid',
+      loadMoreButtonId: 'load-more-button',
+      relatedPostsElementId: 'related-posts',
+      commentsElementId: 'comments-container',
+      searchQuery: new URLSearchParams(window.location.search).get('q'),
+      labelName: window.location.pathname.includes('/label/') ? window.location.pathname.split('/').pop() : null,
+      loadRelated: false,
+      loadComments: false,
+      loadSections: false,
+      blogSections: [],
       ...options
     };
 
@@ -23,11 +33,11 @@ class BloggerMint {
 
   init() {
     this.setupEventListeners();
-    this.loadPosts();
     this.applyCurrentView();
     if (this.options.loadRelated) this.loadRelatedPosts();
     if (this.options.loadSections) this.loadBlogSections();
     if (this.options.loadComments) this.loadComments();
+    this.loadPosts();
   }
 
   setupEventListeners() {
@@ -107,7 +117,7 @@ class BloggerMint {
     const excerpt = this.getExcerpt(post);
     const author = post.author?.[0]?.name?.$t || 'Unknown Author';
     const dateFormatted = this.formatDate(post.published?.$t);
-    const authorImage = this.options.defaultAvatar;
+    const authorImage = post.author?.[0]?.gd$image?.src || this.options.defaultAvatar;
 
     postElement.innerHTML = `
       <div class="w-full h-60 rounded-t-lg">
@@ -163,7 +173,7 @@ class BloggerMint {
 
   toggleView(gridView) {
     this.state.isGridView = gridView;
-    localStorage.setItem('gridView', gridView);
+    localStorage.setItem('gridView', gridView.toString());
     this.applyCurrentView();
   }
 
@@ -184,11 +194,12 @@ class BloggerMint {
       if (isGridView) {
         card.className = 'rounded-lg dark:bg-neutral-800';
         card.firstElementChild.className = 'w-full h-60 rounded-t-lg';
+        card.lastElementChild.className = 'p-4 dark:bg-neutral-800';
       } else {
         card.className = 'rounded-lg flex dark:bg-neutral-800';
-        card.firstElementChild.className = 'w-1/3 md:h-48 h-60 rounded-r-lg';
+        card.firstElementChild.className = 'w-1/3 md:h-48 h-60 rounded-l-lg';
+        card.lastElementChild.className = 'p-4 dark:bg-neutral-800 flex-1';
       }
-      card.lastElementChild.className = `p-4 dark:bg-neutral-800 ${isGridView ? '' : 'flex-1'}`;
     });
   }
 
@@ -383,3 +394,4 @@ class BloggerMint {
     return commentElement;
   }
 }
+});
