@@ -1,5 +1,3 @@
-// BloggerMint.js
-
 class BloggerMint {
   constructor(options) {
     this.options = {
@@ -394,4 +392,3 @@ class BloggerMint {
     return commentElement;
   }
 }
-});
