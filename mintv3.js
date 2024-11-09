@@ -147,7 +147,7 @@
         }
 
         this.container.innerHTML = `
-          <div class="items-related mt-8">
+          <div class="items-related">
             <div class="widget-title mb-4">
               <h3 class="text-lg font-bold text-color-text mb-2 dark:text-neutral-100">${MintBlogger.util.translate('relatedPosts')}</h3>
               <div class="title-border flex items-center gap-1" aria-hidden="true">
