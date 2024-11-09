@@ -6,8 +6,7 @@
   const MintBlogger = {
     config: {
       postsPerPage: 7,
-      commentsPerPage: 5,
-      relatedPostsCount: 5,
+      relatedPostsCount: 3,
       defaultLanguage: 'en',
       supportedLanguages: ['en', 'ar'],
       translations: {
@@ -19,21 +18,19 @@
           readingTime: '{} min read',
           gridView: 'Grid View',
           listView: 'List View',
-          commentCount: '{} Comments',
-          relatedPosts: 'Related Posts',
+          relatedPosts: 'Suggested for you',
           errorOccurred: 'An error occurred. Please try again.'
         },
         ar: {
           loadMore: 'تحميل المزيد',
           loading: 'جاري التحميل...',
-          noMorePosts: 'لا توجد مزيد من المقالات',
+          noMorePosts: 'لا توجد مقالات أخرى',
           copyLinkSuccess: 'تم نسخ رابط المقال',
           readingTime: '{} دقائق للقراءة',
           gridView: 'عرض شبكي',
           listView: 'عرض القائمة',
-          commentCount: '{} تعليقات',
-          relatedPosts: 'مقالات ذات صلة',
-          errorOccurred: 'حدث خطأ. يرجى المحاولة مرة أخرى.'
+          relatedPosts: 'مقترح لك',
+          errorOccurred: 'حدث خطأ. حاول مرة أخرى.'
         }
       }
     },
@@ -60,24 +57,6 @@
           throw error;
         }
       },
-      createElement: function(tag, attributes = {}, children = []) {
-        const element = document.createElement(tag);
-        Object.entries(attributes).forEach(([key, value]) => {
-          if (key === 'className') {
-            element.className = value;
-          } else {
-            element.setAttribute(key, value);
-          }
-        });
-        children.forEach(child => {
-          if (typeof child === 'string') {
-            element.appendChild(document.createTextNode(child));
-          } else {
-            element.appendChild(child);
-          }
-        });
-        return element;
-      },
       formatDate: function(dateString) {
         const date = new Date(dateString);
         const lang = this.getLanguage();
@@ -91,235 +70,209 @@
       loadMoreButton: null,
       currentPage: 1,
       isLoading: false,
-      isGridView: true,
+      isGridView: localStorage.getItem('gridView') !== 'false',
+      authorImages: {},
 
       init: function() {
-        this.container = document.getElementById('mintblogger-posts');
+        this.container = document.getElementById('articles-grid');
         this.loadMoreButton = document.getElementById('load-more-button');
         
         if (this.container && this.loadMoreButton) {
           this.loadMoreButton.addEventListener('click', this.loadMore.bind(this));
-          this.loadInitialPosts();
           this.setupViewToggle();
-        }
-      },
-
-      loadInitialPosts: async function() {
-        try {
-          const data = await this.fetchPosts();
-          this.renderPosts(data.feed.entry);
-        } catch (error) {
-          console.error('Error loading initial posts:', error);
-          this.showError();
+          this.applyCurrentView();
         }
       },
 
       loadMore: async function() {
         if (this.isLoading) return;
         this.isLoading = true;
-        this.updateLoadMoreButton(true);
+        
+        const originalButtonText = this.loadMoreButton.textContent;
+        this.loadMoreButton.innerHTML = originalButtonText + " <span class='mask spin'></span>";
+        this.loadMoreButton.disabled = true;
 
         try {
           const data = await this.fetchPosts();
-          if (data.feed.entry && data.feed.entry.length > 0) {
-            this.renderPosts(data.feed.entry);
-            this.currentPage++;
-          } else {
+          
+          if (!data || !data.feed || !data.feed.entry || data.feed.entry.length === 0) {
             this.showNoMorePosts();
+            return;
           }
+
+          const posts = data.feed.entry;
+
+          // Add skeleton loaders
+          for (let i = 0; i < posts.length; i++) {
+            this.container.innerHTML += '<div class="skeleton rounded-lg dark:bg-neutral-800 h-96"></div>';
+          }
+
+          // Replace skeleton loaders with actual posts
+          setTimeout(() => {
+            this.container.querySelectorAll('.skeleton').forEach(skeleton => skeleton.remove());
+            posts.forEach(post => {
+              const postElement = this.createPostElement(post);
+              if (postElement) {
+                this.container.appendChild(postElement);
+              }
+            });
+
+            this.currentPage++;
+            this.isLoading = false;
+            this.loadMoreButton.innerHTML = originalButtonText;
+            this.loadMoreButton.disabled = false;
+            this.applyCurrentView();
+          }, 250);
+
         } catch (error) {
           console.error('Error loading more posts:', error);
           this.showError();
-        } finally {
-          this.isLoading = false;
-          this.updateLoadMoreButton(false);
         }
       },
 
       fetchPosts: async function() {
-        const apiUrl = `${document.location.origin}/feeds/posts/summary?alt=json&orderby=published&start-index=${this.currentPage * MintBlogger.config.postsPerPage + 1}&max-results=${MintBlogger.config.postsPerPage}`;
+        const urlParams = new URLSearchParams(window.location.search);
+        const searchQuery = urlParams.get('q');
+        const labelName = window.location.pathname.split('/').pop();
+        const isSearchPage = searchQuery !== null;
+        const isLabelPage = window.location.pathname.includes('/label/');
+
+        let apiUrl = `${document.location.origin}/feeds/posts/summary?alt=json&orderby=published&start-index=${this.currentPage * MintBlogger.config.postsPerPage + 1}&max-results=${MintBlogger.config.postsPerPage}`;
+        
+        if (isSearchPage) {
+          apiUrl += `&q=${encodeURIComponent(searchQuery)}`;
+        } else if (isLabelPage) {
+          apiUrl += `/-/${encodeURIComponent(labelName)}`;
+        }
+
         return await MintBlogger.util.fetchJSON(apiUrl);
       },
 
-      renderPosts: function(posts) {
-        posts.forEach(post => {
-          const postElement = this.createPostElement(post);
-          this.container.appendChild(postElement);
-        });
-        this.applyCurrentView();
-      },
-
       createPostElement: function(post) {
-        const title = post.title.$t;
-        const url = post.link.find(link => link.rel === 'alternate').href;
+        if (!post) return null;
+
+        const postElement = document.createElement('div');
+        postElement.className = 'rounded-lg dark:bg-neutral-800';
+        
+        const title = post.title && post.title.$t ? post.title.$t : 'No Title';
+        const url = post.link ? post.link.find(link => link.rel === 'alternate').href : '#';
         const image = post.media$thumbnail ? post.media$thumbnail.url.replace(/\/s[0-9]+(\-c)?\//, '/s640/') : 'https://via.placeholder.com/640x360';
-        const excerpt = this.getExcerpt(post);
-        const author = post.author[0].name.$t;
-        const date = MintBlogger.util.formatDate(post.published.$t);
+        
+        let excerpt = 'No excerpt available';
+        if (post.summary && post.summary.$t) {
+          excerpt = post.summary.$t;
+        } else if (post.content && post.content.$t) {
+          const div = document.createElement('div');
+          div.innerHTML = post.content.$t;
+          excerpt = div.textContent || div.innerText || '';
+        }
+        excerpt = excerpt.substring(0, 100).trim() + (excerpt.length > 100 ? '...' : '');
 
-        return MintBlogger.util.createElement('div', { className: 'mintblogger-post' }, [
-          MintBlogger.util.createElement('div', { className: 'post-image' }, [
-            MintBlogger.util.createElement('a', { href: url }, [
-              MintBlogger.util.createElement('img', { src: image, alt: title, className: 'w-full h-full object-cover' })
-            ])
-          ]),
-          MintBlogger.util.createElement('div', { className: 'post-content' }, [
-            MintBlogger.util.createElement('h3', { className: 'post-title' }, [
-              MintBlogger.util.createElement('a', { href: url }, [title])
-            ]),
-            MintBlogger.util.createElement('p', { className: 'post-excerpt' }, [excerpt]),
-            MintBlogger.util.createElement('div', { className: 'post-meta' }, [
-              MintBlogger.util.createElement('span', { className: 'post-author' }, [author]),
-              MintBlogger.util.createElement('span', { className: 'post-date' }, [date])
-            ])
-          ])
-        ]);
+        const author = post.author && post.author[0] && post.author[0].name ? post.author[0].name.$t : 'Unknown Author';
+        
+        const dateIso = post.published && post.published.$t ? post.published.$t : new Date().toISOString();
+        const dateFormatted = MintBlogger.util.formatDate(dateIso);
+
+        // Get the author's image
+        let authorImage = this.getAuthorImage(post);
+
+        postElement.innerHTML = `
+          <div class="w-full h-60 rounded-t-lg">
+            <a aria-label="Image" href="${url}">
+              <img alt="${title}" class="object-cover w-full h-full rounded-t-lg nice-effect" src="${image}">
+            </a>
+          </div>
+          <div class="p-4 dark:bg-neutral-800">
+            <h3 class="text-lg font-semibold mb-5">
+              <a class="link-title" href="${url}">${title}</a>
+            </h3>
+            <p class="text-sm text-neutral-600 dark:text-neutral-300">${excerpt}</p>
+            <div class="shrink-0 group block mt-4">
+              <div class="flex items-center">
+                <img alt="Avatar" class="inline-block shrink-0 w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 rounded-full" src="${authorImage}">
+                <div class="rtl:mr-3 ltr:ml-3">
+                  <h3 class="font-semibold text-neutral-800 dark:text-neutral-300 text-sm sm:text-base">
+                    ${author}
+                  </h3>
+                  <time datetime="${dateIso}" class="text-xs sm:text-sm text-neutral-500">
+                    ${dateFormatted}
+                  </time>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        return postElement;
       },
 
-      getExcerpt: function(post) {
-        let excerpt = post.summary ? post.summary.$t : '';
-        excerpt = excerpt.replace(/<[^>]+>/g, '');
-        return excerpt.length > 100 ? excerpt.substring(0, 100) + '...' : excerpt;
-      },
+      getAuthorImage: function(post) {
+        const authorId = post.author[0].gd$image.src;
+        if (this.authorImages[authorId]) {
+          return this.authorImages[authorId];
+        }
 
-      updateLoadMoreButton: function(isLoading) {
-        this.loadMoreButton.textContent = isLoading ? MintBlogger.util.translate('loading') : MintBlogger.util.translate('loadMore');
-        this.loadMoreButton.disabled = isLoading;
+        let authorImage = 'https://lh3.googleusercontent.com/a/default-user';
+        if (!authorId.includes('g/blank.gif') && !authorId.includes('g/b16-rounded.gif')) {
+          authorImage = authorId.replace(/\/s\d+-c\//, '/s80-c/');
+        }
+
+        this.authorImages[authorId] = authorImage;
+        return authorImage;
       },
 
       showNoMorePosts: function() {
         this.loadMoreButton.textContent = MintBlogger.util.translate('noMorePosts');
         this.loadMoreButton.disabled = true;
+        this.loadMoreButton.className = 'py-3 px-6 text-sm rounded-lg border border-primary text-primary cursor-not-allowed font-semibold text-center shadow-xs transition-all duration-500 bg-gray-300 text-gray-600';
+        this.isLoading = false;
       },
 
       showError: function() {
         this.loadMoreButton.textContent = MintBlogger.util.translate('errorOccurred');
-        this.loadMoreButton.disabled = true;
+        this.loadMoreButton.classList.add('err');
+        
+        setTimeout(() => {
+          this.loadMoreButton.textContent = MintBlogger.util.translate('loadMore');
+          this.loadMoreButton.classList.remove('err');
+          this.loadMoreButton.disabled = false;
+        }, 1500);
       },
 
       setupViewToggle: function() {
-        const gridButton = document.getElementById('grid-view-button');
-        const listButton = document.getElementById('list-view-button');
+        const gridIcon = document.getElementById('grid-icon');
+        const listIcon = document.getElementById('list-icon');
 
-        if (gridButton && listButton) {
-          gridButton.addEventListener('click', () => this.toggleView(true));
-          listButton.addEventListener('click', () => this.toggleView(false));
+        if (gridIcon && listIcon) {
+          gridIcon.addEventListener('click', () => this.toggleView(true));
+          listIcon.addEventListener('click', () => this.toggleView(false));
         }
       },
 
-      toggleView: function(isGrid) {
-        this.isGridView = isGrid;
-        localStorage.setItem('mintbloggerGridView', isGrid);
+      toggleView: function(gridView) {
+        this.isGridView = gridView;
+        localStorage.setItem('gridView', gridView);
         this.applyCurrentView();
       },
 
       applyCurrentView: function() {
-        const gridButton = document.getElementById('grid-view-button');
-        const listButton = document.getElementById('list-view-button');
+        const gridIcon = document.getElementById('grid-icon');
+        const listIcon = document.getElementById('list-icon');
 
-        if (this.isGridView) {
-          this.container.classList.add('grid-view');
-          this.container.classList.remove('list-view');
-          gridButton.classList.add('active');
-          listButton.classList.remove('active');
-        } else {
-          this.container.classList.add('list-view');
-          this.container.classList.remove('grid-view');
-          listButton.classList.add('active');
-          gridButton.classList.remove('active');
-        }
-      }
-    },
+        gridIcon.classList.toggle('active', this.isGridView);
+        listIcon.classList.toggle('active', !this.isGridView);
+        this.container.className = `grid gap-6 ${this.isGridView ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`;
 
-    comments: {
-      container: null,
-      loadMoreButton: null,
-      currentPage: 1,
-      isLoading: false,
-
-      init: function() {
-        this.container = document.getElementById('mintblogger-comments');
-        this.loadMoreButton = document.getElementById('load-more-comments');
-        
-        if (this.container && this.loadMoreButton) {
-          this.loadMoreButton.addEventListener('click', this.loadMore.bind(this));
-          this.loadInitialComments();
-        }
-      },
-
-      loadInitialComments: async function() {
-        try {
-          const data = await this.fetchComments();
-          this.renderComments(data.feed.entry);
-        } catch (error) {
-          console.error('Error loading initial comments:', error);
-          this.showError();
-        }
-      },
-
-      loadMore: async function() {
-        if (this.isLoading) return;
-        this.isLoading = true;
-        this.updateLoadMoreButton(true);
-
-        try {
-          const data = await this.fetchComments();
-          if (data.feed.entry && data.feed.entry.length > 0) {
-            this.renderComments(data.feed.entry);
-            this.currentPage++;
+        this.container.querySelectorAll('.rounded-lg.dark\\:bg-neutral-800').forEach((card) => {
+          if (this.isGridView) {
+            card.className = 'rounded-lg dark:bg-neutral-800';
+            card.firstElementChild.className = 'w-full h-60 rounded-t-lg';
           } else {
-            this.showNoMoreComments();
+            card.className = 'rounded-lg flex dark:bg-neutral-800';
+            card.firstElementChild.className = 'w-1/3 md:h-48 h-60 rounded-r-lg';
           }
-        } catch (error) {
-          console.error('Error loading more comments:', error);
-          this.showError();
-        } finally {
-          this.isLoading = false;
-          this.updateLoadMoreButton(false);
-        }
-      },
-
-      fetchComments: async function() {
-        const apiUrl = `${document.location.origin}/feeds/comments/default?alt=json&orderby=published&start-index=${this.currentPage * MintBlogger.config.commentsPerPage + 1}&max-results=${MintBlogger.config.commentsPerPage}`;
-        return await MintBlogger.util.fetchJSON(apiUrl);
-      },
-
-      renderComments: function(comments) {
-        comments.forEach(comment => {
-          const commentElement = this.createCommentElement(comment);
-          this.container.appendChild(commentElement);
+          card.lastElementChild.className = `p-4 dark:bg-neutral-800 ${this.isGridView ? '' : 'flex-1'}`;
         });
-      },
-
-      createCommentElement: function(comment) {
-        const author = comment.author[0].name.$t;
-        const content = comment.content.$t;
-        const date = MintBlogger.util.formatDate(comment.published.$t);
-        const postTitle = comment.title.$t.split(' on ')[1];
-
-        return MintBlogger.util.createElement('div', { className: 'mintblogger-comment' }, [
-          MintBlogger.util.createElement('div', { className: 'comment-author' }, [author]),
-          MintBlogger.util.createElement('div', { className: 'comment-content' }, [content]),
-          MintBlogger.util.createElement('div', { className: 'comment-meta' }, [
-            MintBlogger.util.createElement('span', { className: 'comment-date' }, [date]),
-            MintBlogger.util.createElement('span', { className: 'comment-post' }, [postTitle])
-          ])
-        ]);
-      },
-
-      updateLoadMoreButton: function(isLoading) {
-        this.loadMoreButton.textContent = isLoading ? MintBlogger.util.translate('loading') : MintBlogger.util.translate('loadMore');
-        this.loadMoreButton.disabled = isLoading;
-      },
-
-      showNoMoreComments: function() {
-        this.loadMoreButton.textContent = MintBlogger.util.translate('noMoreComments');
-        this.loadMoreButton.disabled = true;
-      },
-
-      showError: function() {
-        this.loadMoreButton.textContent = MintBlogger.util.translate('errorOccurred');
-        this.loadMoreButton.disabled = true;
       }
     },
 
@@ -327,7 +280,7 @@
       container: null,
 
       init: function() {
-        this.container = document.getElementById('mintblogger-related-posts');
+        this.container = document.querySelector('.items-related');
         if (this.container) {
           this.loadRelatedPosts();
         }
@@ -359,83 +312,51 @@
       renderRelatedPosts: function(posts) {
         if (!posts || posts.length === 0) return;
 
-        const heading = MintBlogger.util.createElement('h3', { className: 'related-posts-heading' }, [
-          MintBlogger.util.translate('relatedPosts')
-        ]);
-        this.container.appendChild(heading);
+        const relatedPostsContainer = this.container.querySelector('.grid');
+        relatedPostsContainer.innerHTML = '';
 
-        const list = MintBlogger.util.createElement('ul', { className: 'related-posts-list' });
         posts.forEach(post => {
-          const listItem = this.createRelatedPostElement(post);
-          list.appendChild(listItem);
+          const postElement = this.createRelatedPostElement(post);
+          relatedPostsContainer.appendChild(postElement);
         });
-        this.container.appendChild(list);
       },
 
       createRelatedPostElement: function(post) {
         const title = post.title.$t;
         const url = post.link.find(link => link.rel === 'alternate').href;
+        const image = post.media$thumbnail ? post.media$thumbnail.url.replace(/\/s[0-9]+(\-c)?\//, '/s300-c/') : 'https://via.placeholder.com/300x200';
+        const author = post.author[0].name.$t;
+        const dateIso = post.published.$t;
+        const dateFormatted = MintBlogger.util.formatDate(dateIso);
+        const authorImage = MintBlogger.posts.getAuthorImage(post);
 
-        return MintBlogger.util.createElement('li', { className: 'related-post-item' }, [
-          MintBlogger.util.createElement('a', { href: url }, [title])
-        ]);
-      }
-    },
+        const article = document.createElement('article');
+        article.className = 'relative isolate flex flex-col justify-end overflow-hidden rounded-lg bg-gray-900 px-4 pb-4 pt-32 sm:pt-24 lg:pt-32';
+        article.innerHTML = `
+          <img alt="" class="absolute inset-0 -z-10 h-full w-full object-cover" width="300" height="200" style="aspect-ratio: 300 / 200; object-fit: cover" src="${image}">
+          <div class="absolute inset-0 -z-10 bg-gradient-to-t from-gray-900 via-gray-900/40"></div>
+          <div class="absolute inset-0 -z-10 rounded-lg ring-1 ring-inset ring-gray-900/10"></div>
+          <div class="flex flex-wrap items-center gap-y-1 overflow-hidden text-sm leading-6 text-gray-300">
+            <time datetime="${dateIso}" class="rtl:ml-4 ltr:mr-4">${dateFormatted}</time>
+            <div class="rtl:mr-2 ltr:ml-2 flex items-center gap-x-2 text-gray-500">
+              <span class="relative flex overflow-hidden rounded-full h-5 w-5 flex-none">
+                <img class="aspect-square h-full w-full" alt="${author}" src="${authorImage}">
+              </span>
+              <span>${author}</span>
+            </div>
+          </div>
+          <h3 class="mt-2 text-base font-semibold leading-6 text-white">
+            <a href="${url}">${title}</a>
+          </h3>
+        `;
 
-    postUtilities: {
-      init: function() {
-        this.setupCopyLink();
-        this.calculateReadingTime();
-      },
-
-      setupCopyLink: function() {
-        const copyButton = document.getElementById('copy-link-button');
-        if (copyButton) {
-          copyButton.addEventListener('click', this.copyPostUrl.bind(this));
-        }
-      },
-
-      copyPostUrl: function() {
-        navigator.clipboard.writeText(window.location.href).then(() => {
-          this.showTooltip(MintBlogger.util.translate('copyLinkSuccess'));
-        }).catch(err => {
-          console.error('Could not copy text: ', err);
-        });
-      },
-
-      showTooltip: function(message) {
-        const tooltip = document.getElementById('copy-link-tooltip');
-        if (tooltip) {
-          tooltip.textContent = message;
-          tooltip.classList.remove('opacity-0');
-          tooltip.classList.add('opacity-100');
-
-          setTimeout(() => {
-            tooltip.classList.remove('opacity-100');
-            tooltip.classList.add('opacity-0');
-          }, 2000);
-        }
-      },
-
-      calculateReadingTime: function() {
-        const articleContent = document.querySelector('.post-body');
-        const readingTimeElement = document.getElementById('reading-time');
-        
-        if (articleContent && readingTimeElement) {
-          const text = articleContent.textContent || articleContent.innerText;
-          const wordCount = text.trim().split(/\s+/).length;
-          const readingTime = Math.ceil(wordCount / 200);
-          
-          readingTimeElement.textContent = MintBlogger.util.translate('readingTime', readingTime);
-        }
+        return article;
       }
     },
 
     init: function() {
       this.posts.init();
-      this.comments.init();
       this.relatedPosts.init();
-      this.postUtilities.init();
     }
   };
 
@@ -450,3 +371,5 @@
   window.MintBlogger = MintBlogger;
 
 })(window, document);
+
+console.log("MintBlogger initialized successfully!");
